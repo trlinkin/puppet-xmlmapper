@@ -1,0 +1,524 @@
+require 'rexml/document'
+require 'puppet/util/filetype'
+require 'puppetx/provider/xmlcomponentstore'
+
+# Forward Declaration
+module PuppetX; end
+
+module PuppetX::Provider; end
+
+module PuppetX::Provider::XmlMapper
+
+  def initialize(resource, element = nil)
+    super resource
+
+    if element.nil?
+      @property_hash[:ensure] = :absent
+    else
+      @element = element
+      @property_hash[:ensure] = :present
+    end
+  end
+
+  def document_path
+    @resource[self.class.document_path]
+  end
+
+  def create
+    root_name = self.class.xpath.split("/").last
+    @element = REXML::Element.new root_name
+
+    # Root elements have no sub-elements that establish
+    # uniqueness. They are unique due to some external comparison
+    # such as raw file path. Any elements that seems as though they
+    # would have been a key should be controlled with a property if
+    # the type is a root_element.
+    #
+    unless self.class.root_element?
+
+      # Support for composite namevars.
+      #
+      # Any namevar needs a corresponding component in the provider
+      # in order to be created.
+      resource.class.key_attribute_parameters.each do |key|
+        namevar = key.name
+        @property_hash[namevar] = @resource[namevar]
+      end
+    else
+
+      # Yes, right now we're not managing the xmldecl.
+      # TODO: Eventually manage the xmldecl.
+      self.class.add_xmldecl(document_path)
+    end
+
+    @resource.class.validproperties.each do |property|
+      if value = @resource.should(property)
+        @property_hash[property] = value unless value == :absent
+      end
+    end
+
+    # If everything is copacetic (the base element in the document we rely on) then
+    # we should have no issue adding out new element to the document. If not, we fail
+    # before we add a success to the report. If we succeed, the rest of the properties
+    # and such will be added durring the flushing process.
+    #
+    # 'parent_path' is impliment whenever the resource we're managing is relative to another
+    # element in the tree. It is an attempt to discover the correct base element in the tree.
+    parent = nil
+    if self.respond_to? :parent_path
+      parent = parent_path
+    end
+    self.class.add_entity(@element, document_path, parent)
+
+    @property_hash[:ensure] = :create
+    dirty!
+  end
+
+  def destroy
+    @property_hash[:ensure] = :absent
+
+    # The element will remove itself from the document tree.
+    @element.remove
+  end
+
+
+  # The ensure property gets checked first. This is when we want to see if we have a failure
+  # with the file this particular intance is using. We have deferred the error until now because
+  # we did not want to fail the prefetch for every instance using this metaclass. If any other Weblogic
+  # config files are being managed, they should continue to process fine.
+  #
+  def exists?
+    raise Puppet::Error, self.class.failed_message(document_path) if self.class.failed? document_path
+    self.class.unref! document_path
+    @property_hash[:ensure] and @property_hash[:ensure] == :present
+  end
+
+  # Check is components marked with 'isbase!' exist. We consider all of the components in bulk. If one
+  # is absent (or for some reason an attribute), we consider them all absent. The exception being when they
+  # are all supposed to be absent, we consider one being present to be the same as all being present. Since
+  # there is validation making sure they do not conflict with properties, we can overload the usage of the
+  # @property_hash and have these processed when other properties get flushed.
+  #
+  def basecomponents
+    self.class.component_store.get_base_components.each do |name, component|
+      path = self.class.component_store.xpath(component)
+      property = REXML::XPath.first(@element, path)
+
+      return :present if property and resource[:basecomponents] == :absent
+      return :absent if property.nil? and resource[:basecomponents] == :present
+    end
+    resource[:basecomponents] == :present ? :present : :absent
+  end
+
+  # Set our desired state for base components.
+  #
+  def basecomponents=(value)
+    @property_hash[:basecomponents] = value
+    dirty!
+  end
+
+  def flush
+    if self.dirty?
+      # Apply base elements to the entity. These are elements that the entity always
+      # provides for other entities to exist in. Consider it like the contract between
+      # resources in the XML document. I'm unsure if there is a better way to handel this,
+      # for example an XML where the existance of these elements would cause an issue or
+      # some be interpreted as werid defaults. This seems silly enough to me that I won't
+      # worry about it right now. I don't know of a good way to have the types communicate
+      # what they need. Although, to be honest, in that situation, these components should
+      # then be properties with :present :absent as their values. This puts the need for
+      # understanding back on the user declaring types that are related. Overall, that means
+      # this feature is purely a convienence for times a property really isn't needed, which I
+      # assume is the more common case.
+      #
+      # We are assuming that no base componenets would have properties behind them. We validate
+      # against this when declaring new components. The array we receive below should be safe. We
+      # then take advantage of the fact we are done with the property_hash at this point, and add
+      # these componenets to the hash to take advantage of the apply_component method.
+      #
+      unless @property_hash[:ensure] == :absent or @property_hash[:basecomponents].nil?
+        self.class.component_store.get_base_components.each do |name, component|
+          @property_hash[name] = @property_hash[:basecomponents]
+        end
+        @property_hash.delete(:basecomponents)
+      end
+
+      @property_hash.keys.each do |key|
+        apply_component key unless key == :ensure
+      end
+    end
+
+    # if XSD parsing is successful, I will need to impliment the resequencing
+    if resequence?
+      resequence_element
+    end
+
+
+    self.class.flush_document document_path
+  end
+
+  # Update a component in the entity.
+  def apply_component(component)
+    unless component.is_a? PuppetX::Provider::XmlComponent
+      name = component.intern
+      component = self.class.component_store[name]
+    else
+      name = component.attr(:name)
+    end
+
+    path = self.class.component_store.xpath(component)
+    match = REXML::XPath.first(@element, path)
+
+    if @property_hash[name] == :absent
+      unless match.nil?
+        match.remove if [REXML::Element, REXML::Attribute].include? match.class
+      end
+    else
+      if match.nil?
+        match = create_component_in_entity(component)
+      end
+
+      unless @property_hash[name] == :present
+        if match.is_a? REXML::Element
+          match.text = @property_hash[name]
+        elsif match.is_a? REXML::Attribute
+          parent = match.element
+          temp_attr = REXML::Attribute.new(name.to_s, @property_hash[name].to_s)
+
+          # Replace the old attribute
+          match.remove
+          parent.add_attribute(temp_attr)
+        end
+      end
+    end
+  end
+
+  def create_component_in_entity(component)
+    name = component.xml_name
+    type = component.attr(:type)
+
+    if parent_name = component.attr(:parent)
+      parent_component = self.class.component_store[parent_name.intern]
+      path = self.class.component_store.xpath(parent_component)
+      match = REXML::XPath.first(@element, path)
+
+      unless match.nil?
+        parent = match
+      else
+        parent = create_component_in_entity(parent_component)
+      end
+    else
+      parent = @element
+    end
+
+    if type == :element
+      new_component = REXML::Element.new name.to_s
+      parent << new_component
+    else
+      new_component = REXML::Attribute.new name.to_s
+      parent.add_attribute new_component
+    end
+
+    # If supported, the newly inserted element may need to bre re-arranged inside our entity.
+    resequence!
+    return new_component
+  end
+
+  def resequence_element
+
+  end
+
+  # Mark Local instance as dirty, create reference on document reference, document as dirty.
+  def dirty!
+    @dirty = true
+    self.class.dirty! document_path
+  end
+
+  def dirty?
+    @dirty
+  end
+
+  def resequence!
+    @resequence = true
+  end
+
+  def resequence?
+    @resequence
+  end
+
+  def self.included(klass)
+    klass.extend PuppetX::Provider::XmlMapper::ClassMethods
+    klass.mk_property_methods
+    klass.initvars
+  end
+
+  module ClassMethods
+
+    # Shared between all types using this mix-in
+    @@documents = Hash.new {|h,k| h[k] = {}}
+
+    # Multiple classes will need to operate on entities in one file.
+    # This class variable lets us keep everything in order.
+    #
+    def documents
+      @@documents
+    end
+
+    attr_accessor :xpath
+    attr_accessor :document_path
+    attr_reader   :instances
+    attr_reader   :component_store
+
+    # Relevant to only Meta-Classes of the types implimenting this mix-in.
+    # Since each type can modify multiple domains, the meta-classes need a way
+    # to keep track of the instances
+    #
+    # Called upon including the XmlMapper module in a provider.
+    #
+    def initvars
+      @instances       = Hash.new {|h,k| h[k] = []}
+      @xpath           = String.new
+      @document_path   = 'document_path'
+      @component_store = PuppetX::Provider::XmlComponentStore.new
+    end
+
+    # Create methods for getting current value and setting desired value of components in the
+    # provider
+    #
+    def mk_property_methods
+      resource_type.validproperties.each do |attr|
+        attr = attr.intern if attr.respond_to? :intern and not attr.is_a? Symbol
+
+        next if [:basecomponents,:ensure].include? attr
+
+        define_method(attr) do
+          component = self.class.component_store[attr]
+          path = self.class.component_store.xpath(component)
+          property = REXML::XPath.first(@element, path)
+
+          if property.is_a? REXML::Element and property.has_text?
+            return property.text
+          elsif property.is_a? REXML::Attribute
+            return property.value
+          end
+          return :absent
+        end
+
+        define_method("#{attr}=") do |val|
+          @property_hash[attr] = val
+          self.dirty!
+        end
+      end
+    end
+
+    # Called by puppet to prefetch resources from the disk.
+    #
+    def prefetch(resources = {})
+      resources.each do |name, resource|
+        doc = resource[self.document_path]
+        fetch_document( doc )
+
+        fetch_instances( doc )
+
+        match_resource_with_provider( resource, doc )
+      end
+    end
+
+    # Attempts to open a file as a Puppet::Util::FileType, parse it into an XML document object
+    # using REXML, and cache both the results.
+    #
+    # If the file does not exist, it will be created.
+    #
+    def fetch_document(document)
+      if !fetched_document? document then
+        file = Puppet::Util::FileType.filetype(:flat).new(document)
+
+        begin
+          xml_doc = REXML::Document.new file.read
+        rescue Puppet::Error => detail
+          failed!(document, detail.message)
+        rescue REXML::ParseException => detail
+          msg = detail.continued_exception.to_s.split("\n")[0]
+          failed!(document, "Failed to open #{document}: #{msg}")
+        end
+
+        mapped_file(document, file)
+        xml_document(document, xml_doc)
+      end
+    end
+
+    # Check to see if the file path being referenced has already been processed with `fetch_document`.
+    #
+    # @return [TrueClass || FalseClass]
+    def fetched_document?(document)
+      documents.has_key? document
+    end
+
+    def fetch_instances(document)
+      raise Puppet::Error, "XmlMapper based provider \"#{name}\" needs to have a search xpath set." if xpath.empty?
+
+      unless failed? document and !fetched_instances? document
+        xml = xml_document document
+        instances[document] = REXML::XPath.match xml, xpath
+      end
+    end
+
+    def fetched_instances?(document)
+      instances.has_key? document
+    end
+
+    def match_resource_with_provider(resource, document)
+      unless failed? document
+        ref! document
+        matches = instances[document]
+        keys    = resource.class.key_attribute_parameters
+
+        matches.each do |match|
+          matched = true
+
+          # Rexml Should only ever load one root element. By that reasoning,
+          # it is an automatic match. This means though, that for a type
+          # representing a root_element, it needs to have some other sorce of
+          # uniqueness in the catalog. The most reasonable form of uniqueness
+          # is the raw document path.
+          #
+          # Rexml will throw an excpetion if it were to ever attempt to load two
+          # root_elements. It will also not write two root elements to the raw file.
+          # Such an action as writing two root_elements to the raw file would cause
+          # every type manipulating that file to not persist. I'm not sure of a good
+          # way to have those errors bubble back up to the inidividual types since they
+          # will technically think they have completed before the raw file flush is
+          # performed.
+          #
+          unless root_element?
+            keys.each do |key|
+              value = resource[key.name].intern
+              component = component_store[key.name]
+              xpath = component_store.xpath(component)
+              element = REXML::XPath.match(match, xpath).first
+
+              if element.is_a? REXML::Element
+                element_value = element.text.intern
+              elsif element.is_a? REXML::Attribute
+                element_value = element.value.intern
+              end
+
+              if element.nil? or value != element_value
+                matched = false
+                break
+              end
+            end
+          end
+
+          if matched
+            provider = new(resource, match)
+            resource.provider = provider
+            matches.delete(match)
+            return
+          end
+        end
+
+        # We could not find a match, so we are going with a default provider.
+        provider = new(resource)
+        resource.provider = provider
+      end
+    end
+
+    def add_xmldecl(document, version=1)
+      doc = xml_document(document)
+      doc << REXML::XMLDecl.new(version)
+    end
+
+    def add_entity(element, document, path = nil)
+      unless path
+        path = xpath.split('/')
+        path.pop
+        path = path.join('/')
+      end
+
+      doc = xml_document(document)
+      parent = REXML::XPath.first(doc, path)
+
+      raise Puppet::Error, "Cannot save resource, parent element \"#{path}\" not found." if parent.nil?
+      parent << element
+    end
+
+    def flush_document(document)
+      unless ref?(document)
+        contents = String.new
+        file = mapped_file(document)
+        xml_doc = xml_document(document)
+        formatter = REXML::Formatters::Pretty.new
+        formatter.compact = true
+        formatter.write(xml_doc, contents)
+        file.backup
+        file.write(contents)
+      end
+    end
+
+    # Mark document as failed, and optionally provide a reason. If called again
+    # it could overwrite the message, however, you should not be doing things
+    # that could put you in a failure state if you're already failed.
+    def failed!(document, msg = nil)
+      documents[document][:failure_message] = msg
+      documents[document][:failed] = true
+    end
+
+    def failed?(document)
+      documents[document][:failed]
+    end
+
+    def failed_message(document)
+      return "There is a failure with the WebLogic config." unless documents[document][:failure_message]
+      documents[document][:failure_message]
+    end
+
+    def mapped_file(document, file = nil)
+      return documents[document][:filetype] unless file and not failed? document
+      documents[document][:filetype] = file
+      documents[document][:dirty] = false
+      documents[document][:ref]   = 0
+    end
+
+    def xml_document(document, xml = nil)
+      return documents[document][:xml] unless  xml and documents[document][:xml].nil?
+      documents[document][:xml] = xml
+    end
+
+    def dirty!(document)
+      documents[document][:dirty] = true
+    end
+
+    def dirty?(document)
+      documents[document][:dirty]
+    end
+
+    def ref!(document)
+      documents[document][:ref] += 1
+    end
+
+    def unref!(document)
+      documents[document][:ref] -= 1
+    end
+
+    def ref?(document)
+      documents[document][:ref] > 0
+    end
+
+    def root_element
+      @root_element = true
+    end
+
+    def root_element?
+      @root_element
+    end
+
+    def new_component(name, &block)
+      component_store.new_component(name, &block)
+
+      # Validation for base componenets. We cannot have a base component that
+      # might have a property asscoiated with it.
+      fail("Component \'#{name}\' has an assciated property, it cannot be a base component") if component_store[name].isbase? and resource_type.validproperty? name
+    end
+  end
+end
