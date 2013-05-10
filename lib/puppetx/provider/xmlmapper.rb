@@ -247,11 +247,14 @@ module PuppetX::Provider::XmlMapper
           path = self.class.component_store.xpath(component)
           property = REXML::XPath.first(@element, path)
 
+          return :present if property and resource.should(attr) == :present
+
           if property.is_a? REXML::Element and property.has_text?
             return property.text
           elsif property.is_a? REXML::Attribute
             return property.value
           end
+
           return :absent
         end
 
