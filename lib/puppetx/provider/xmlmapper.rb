@@ -28,13 +28,13 @@ module PuppetX::Provider::XmlMapper
     root_name = self.class.xpath.split("/").last
     @element = REXML::Element.new root_name
 
-    # Root elements have no sub-elements that establish
+    # Singleton elements (such as root elements) have no sub-elements that establish
     # uniqueness. They are unique due to some external comparison
     # such as raw file path. Any elements that seems as though they
     # would have been a key should be controlled with a property if
-    # the type is a root_element.
+    # the type is a unique_element.
     #
-    unless self.class.root_element?
+    unless self.class.singleton_element?
 
       # Support for composite namevars.
       #
@@ -45,10 +45,9 @@ module PuppetX::Provider::XmlMapper
         @property_hash[namevar] = @resource[namevar]
       end
     else
-
       # Yes, right now we're not managing the xmldecl.
       # TODO: Eventually manage the xmldecl.
-      self.class.add_xmldecl(document_path)
+      self.class.add_xmldecl(document_path) if self.class.root_element?
     end
 
     @resource.class.validproperties.each do |property|
@@ -376,9 +375,9 @@ module PuppetX::Provider::XmlMapper
         matches.each do |match|
           matched = true
 
-          # Rexml Should only ever load one root element. By that reasoning,
+          # Rexml Should only ever load one root or singleton element. By that reasoning,
           # it is an automatic match. This means though, that for a type
-          # representing a root_element, it needs to have some other sorce of
+          # representing a singleton or root element, it needs to have some other sorce of
           # uniqueness in the catalog. The most reasonable form of uniqueness
           # is the raw document path.
           #
@@ -390,7 +389,7 @@ module PuppetX::Provider::XmlMapper
           # will technically think they have completed before the raw file flush is
           # performed.
           #
-          unless root_element?
+          unless singleton_element?
             keys.each do |key|
               value = resource[key.name].intern
               component = component_store[key.name]
@@ -505,12 +504,23 @@ module PuppetX::Provider::XmlMapper
       documents[document][:ref] > 0
     end
 
+    # Root elements are globally unique and have access to the xmldecl and doctype
     def root_element
       @root_element = true
+      singleton_element
     end
 
     def root_element?
       @root_element
+    end
+
+    # Are we globally unique?
+    def singleton_element
+      @singleton = true
+    end
+
+    def singleton_element?
+      @singleton
     end
 
     def new_component(name, &block)
