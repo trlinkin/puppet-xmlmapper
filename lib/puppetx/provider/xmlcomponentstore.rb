@@ -46,13 +46,6 @@ class PuppetX::Provider::XmlComponentStore
     return path
   end
 
-  def get_base_components
-    matches = components.select do |name, component|
-      component.isbase?
-    end
-    matches
-  end
-
   private
 
   def components

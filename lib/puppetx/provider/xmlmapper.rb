@@ -92,56 +92,8 @@ module PuppetX::Provider::XmlMapper
     @property_hash[:ensure] and @property_hash[:ensure] == :present
   end
 
-  # Check is components marked with 'isbase!' exist. We consider all of the components in bulk. If one
-  # is absent (or for some reason an attribute), we consider them all absent. The exception being when they
-  # are all supposed to be absent, we consider one being present to be the same as all being present. Since
-  # there is validation making sure they do not conflict with properties, we can overload the usage of the
-  # @property_hash and have these processed when other properties get flushed.
-  #
-  def basecomponents
-    self.class.component_store.get_base_components.each do |name, component|
-      path = self.class.component_store.xpath(component)
-      property = REXML::XPath.first(@element, path)
-
-      return :present if property and resource[:basecomponents] == :absent
-      return :absent if property.nil? and resource[:basecomponents] == :present
-    end
-    resource[:basecomponents] == :present ? :present : :absent
-  end
-
-  # Set our desired state for base components.
-  #
-  def basecomponents=(value)
-    @property_hash[:basecomponents] = value
-    dirty!
-  end
-
   def flush
     if self.dirty?
-      # Apply base elements to the entity. These are elements that the entity always
-      # provides for other entities to exist in. Consider it like the contract between
-      # resources in the XML document. I'm unsure if there is a better way to handel this,
-      # for example an XML where the existance of these elements would cause an issue or
-      # some be interpreted as werid defaults. This seems silly enough to me that I won't
-      # worry about it right now. I don't know of a good way to have the types communicate
-      # what they need. Although, to be honest, in that situation, these components should
-      # then be properties with :present :absent as their values. This puts the need for
-      # understanding back on the user declaring types that are related. Overall, that means
-      # this feature is purely a convienence for times a property really isn't needed, which I
-      # assume is the more common case.
-      #
-      # We are assuming that no base componenets would have properties behind them. We validate
-      # against this when declaring new components. The array we receive below should be safe. We
-      # then take advantage of the fact we are done with the property_hash at this point, and add
-      # these componenets to the hash to take advantage of the apply_component method.
-      #
-      unless @property_hash[:ensure] == :absent or @property_hash[:basecomponents].nil?
-        self.class.component_store.get_base_components.each do |name, component|
-          @property_hash[name] = @property_hash[:basecomponents]
-        end
-        @property_hash.delete(:basecomponents)
-      end
-
       @property_hash.keys.each do |key|
         apply_component key unless key == :ensure
       end
@@ -288,7 +240,7 @@ module PuppetX::Provider::XmlMapper
       resource_type.validproperties.each do |attr|
         attr = attr.intern if attr.respond_to? :intern and not attr.is_a? Symbol
 
-        next if [:basecomponents,:ensure].include? attr
+        next if :ensure == attr
 
         define_method(attr) do
           component = self.class.component_store[attr]
@@ -525,10 +477,6 @@ module PuppetX::Provider::XmlMapper
 
     def new_component(name, &block)
       component_store.new_component(name, &block)
-
-      # Validation for base componenets. We cannot have a base component that
-      # might have a property asscoiated with it.
-      fail("Component \'#{name}\' has an assciated property, it cannot be a base component") if component_store[name].isbase? and resource_type.validproperty? name
     end
   end
 end

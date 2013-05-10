@@ -27,14 +27,6 @@ class PuppetX::Provider::XmlComponent
     (@name_in_config || @name).to_s
   end
 
-  def isbase!
-    @isbase = true
-  end
-
-  def isbase?
-    @isbase
-  end
-
   def attr(name)
     return :element if name.intern == :type unless @type
     instance_variable_get("@#{name}")
@@ -49,7 +41,7 @@ class PuppetX::Provider::XmlComponent
     raise Puppet::Error, "Component #{@name}: '#{name}' must be a string or symbol" unless value.is_a? String or value.is_a? Symbol
   end
 
+  # Validation of component before we continue with more.
   def validate
-    raise Puppet::Error, "Component #{@name}: component cannot be both an attribute and a base component" if @type == :attribute and isbase?
   end
 end
