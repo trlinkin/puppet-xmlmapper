@@ -44,10 +44,6 @@ module PuppetX::Provider::XmlMapper
         namevar = key.name
         @property_hash[namevar] = @resource[namevar]
       end
-    else
-      # Yes, right now we're not managing the xmldecl.
-      # TODO: Eventually manage the xmldecl.
-      self.class.add_xmldecl(document_path) if self.class.root_element?
     end
 
     @resource.class.validproperties.each do |property|
@@ -378,9 +374,18 @@ module PuppetX::Provider::XmlMapper
       end
     end
 
-    def add_xmldecl(document, version=1)
+    def add_xmldecl(document, decl)
       doc = xml_document(document)
-      doc << REXML::XMLDecl.new(version)
+      if doc.xml_decl.document.nil?
+        doc << decl
+      else
+        doc.xml_decl.replace_with decl
+      end
+    end
+
+    def remove_xmldecl(document)
+      doc = xml_document(document)
+      doc.xml_decl.remove
     end
 
     def add_entity(element, document, path = nil)
@@ -480,6 +485,68 @@ module PuppetX::Provider::XmlMapper
 
     def new_component(name, &block)
       component_store.new_component(name, &block)
+    end
+
+    # Add an XML declaration to types that are root elements. Right now, we only allow one to specify
+    # the contents of the xmldecl entity and control its existence. If different versions of documents need
+    # to be managed by a type, it propbably is due to the version of the software being used. Thus, the declaration
+    # version itself is not an appropriate thing to manage. One alternative could be using one 'xmldecl' call over
+    # another based on the value of a parameter representing software version. This would be slightly more coherent.
+    #
+    # This declaration does need a propety to manage it. A simple property with a default will work just fine. There
+    # really is not a simpler way to manage this individual peice of the xml document than the property mechanisms.
+    #
+    # TODO: Right now, this code is very heavy in REXML. Eventually, it will use a future 'xmlhelper' class to build
+    # and compare declarations. The intention being that xmlmapper will eventually support nokogiri.
+    #
+    # TODO: As part of the xml_document abstraction layer, I need to account for REXML's broken processing of the
+    # REXML::XMLDecl's "standalone" attribute in Ruby 1.8.7 (sigh). For now I'll leave it commented out.
+    #
+    def xmldecl(name = :xmldecl, &block)
+      fail("Cannot add an XML Declaration, this entity is not a Root Element") unless root_element?
+      fail("Cannot add a second XML Declaration") if xmldecl?
+
+      @xmldecl = true
+      # Taking advantage of the closure to reference the declaration
+      xmldecl = PuppetX::Provider::XmlDeclComponent.new(&block)
+
+      name = name.intern if name.respond_to? :intern and not name.is_a? Symbol
+
+      define_method(name) do
+        doc = self.class.xml_document(document_path)
+        return :absent if doc.xml_decl.document.nil?
+        return :present if resource[name] == :absent
+
+        # if the property is set to :present, we want to compare our built xmldecl to the xml document's
+        decl = REXML::XMLDecl.new
+        decl.version    = xmldecl[:version]
+        decl.encoding   = xmldecl[:encoding]
+        #decl.standalone = xmldecl[:standalone]
+
+        old_decl = doc.xml_decl
+
+        return :present if decl.to_s == old_decl.to_s
+        :absent
+      end
+
+      define_method("#{name}=") do |val|
+        if val == :absent
+          self.class.remove_xmldecl(document_path)
+          dirty!
+        else
+          decl = REXML::XMLDecl.new
+          decl.version    = xmldecl[:version]
+          decl.encoding   = xmldecl[:encoding]
+          #decl.standalone = xmldecl[:standalone]
+
+          self.class.add_xmldecl(document_path, decl)
+          dirty!
+        end
+      end
+    end
+
+    def xmldecl?
+      @xmldecl
     end
   end
 end
