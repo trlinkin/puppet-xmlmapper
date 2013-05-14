@@ -1,6 +1,7 @@
 require 'rexml/document'
 require 'puppet/util/filetype'
 require 'puppetx/provider/xmlcomponentstore'
+require 'puppetx/provider/xmldeclcomponent'
 
 # Forward Declaration
 module PuppetX; end
