@@ -91,6 +91,10 @@ module PuppetX::Provider::XmlMapper
   def flush
     if self.dirty?
       @property_hash.keys.each do |key|
+        if self.class.is_special_declaration?(key)
+          send("#{key}=", @property_hash[key])
+          next
+        end
         apply_component key unless key == :ensure
       end
     end
@@ -307,7 +311,7 @@ module PuppetX::Provider::XmlMapper
     def fetch_instances(document)
       raise Puppet::Error, "XmlMapper based provider \"#{name}\" needs to have a search xpath set." if xpath.empty?
 
-      unless failed? document and !fetched_instances? document
+      unless failed? document or fetched_instances? document
         xml = xml_document document
         instances[document] = REXML::XPath.match xml, xpath
       end
@@ -386,6 +390,22 @@ module PuppetX::Provider::XmlMapper
     def remove_xmldecl(document)
       doc = xml_document(document)
       doc.xml_decl.remove
+    end
+
+    def add_doctype(document, doctype)
+      doc = xml_document(document)
+      if doc.doctype
+        doc.doctype.replace_with doctype
+      else
+        doc << doctype
+      end
+    end
+
+    def remove_doctype(document)
+      doc = xml_document(document)
+      if doc.doctype
+        doc.doctype.remove
+      end
     end
 
     def add_entity(element, document, path = nil)
@@ -506,11 +526,10 @@ module PuppetX::Provider::XmlMapper
       fail("Cannot add an XML Declaration, this entity is not a Root Element") unless root_element?
       fail("Cannot add a second XML Declaration") if xmldecl?
 
-      @xmldecl = true
+      name = name.intern if name.respond_to? :intern and not name.is_a? Symbol
+      @xmldecl = name
       # Taking advantage of the closure to reference the declaration
       xmldecl = PuppetX::Provider::XmlDeclComponent.new(&block)
-
-      name = name.intern if name.respond_to? :intern and not name.is_a? Symbol
 
       define_method(name) do
         doc = self.class.xml_document(document_path)
@@ -526,7 +545,7 @@ module PuppetX::Provider::XmlMapper
         old_decl = doc.xml_decl
 
         return :present if decl.to_s == old_decl.to_s
-        :absent
+        :inconsistent
       end
 
       define_method("#{name}=") do |val|
@@ -546,7 +565,61 @@ module PuppetX::Provider::XmlMapper
     end
 
     def xmldecl?
-      @xmldecl
+      !!@xmldecl
+    end
+
+    # Add XML doctype to types that are root elements. This method works very similar to xmldecl in that it purely
+    # controls the existence of the doc type declaration as specified in the argument to this method. For now, the
+    # doctype itself is complicated enough that it is a pain to manage all aspects seperately. In addition, this
+    # declaration is to be managed with a property since there is no better way to check the status of its existence
+    # in a way where inconsistencies will be logged. Overall, this is intended to be controlled by a property that
+    # defaults to :present and has no need to be modified.
+    #
+    # TODO: I hate this, I do, I feel like I'm to the point where I'm just phoning it in. Not to mention this code is
+    # very REXML heavy. Luckily, I'll be able to abstract it out later when I add nokogiri support. The important part
+    # is that the interface is correct, and that is what I'm worried about.
+    def doctype(name,content)
+      fail("Cannot add an XML Doctype declaration, this entity is not a Root Element") unless root_element?
+      fail("Cannot add a second XML Doctype declration") if doctype?
+
+      name = name.intern if name.respond_to? :intern and not name.is_a? Symbol
+      @doctype = name
+
+      begin
+        tmp_doctype = REXML::Document.new(REXML::Source.new(content)).doctype
+      rescue
+        fail("DocType content cannot be parsed")
+      end
+
+      define_method(name) do
+        doc = self.class.xml_document(document_path)
+        return :absent unless doc.doctype
+        return :present if resource[name] == :absent
+
+        old_doctype = doc.doctype
+
+        return :present if old_doctype == tmp_doctype
+        :inconsistent
+      end
+
+      define_method("#{name}=") do |val|
+        if val == :absent
+          self.class.remove_doctype(document_path)
+          dirty!
+        else
+          self.class.add_doctype(tmp_doctype, document_path)
+          dirty!
+        end
+      end
+    end
+
+    def doctype?
+      !!@doctype
+    end
+
+    def is_special_declaration?(name)
+      name = name.intern if name.respond_to? :intern and not name.is_a? Symbol
+      [@doctype,@xmldecl].include? name
     end
   end
 end
