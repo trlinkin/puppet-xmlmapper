@@ -397,7 +397,11 @@ module PuppetX::Provider::XmlMapper
       if doc.doctype
         doc.doctype.replace_with doctype
       else
-        doc << doctype
+        if doc.root
+          doc.insert_before(doc.root, doctype)
+        else
+          doc.add(doctype)
+        end
       end
     end
 
@@ -598,7 +602,7 @@ module PuppetX::Provider::XmlMapper
 
         old_doctype = doc.doctype
 
-        return :present if old_doctype == tmp_doctype
+        return :present if old_doctype.to_s == tmp_doctype.to_s
         :inconsistent
       end
 
@@ -607,7 +611,7 @@ module PuppetX::Provider::XmlMapper
           self.class.remove_doctype(document_path)
           dirty!
         else
-          self.class.add_doctype(tmp_doctype, document_path)
+          self.class.add_doctype(document_path,tmp_doctype)
           dirty!
         end
       end
