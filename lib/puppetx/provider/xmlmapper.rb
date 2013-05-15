@@ -105,7 +105,13 @@ module PuppetX::Provider::XmlMapper
       resequence_element
     end
 
+    # Due to temporal coupling issues, we may need to self_refresh at times
+    unless resource.self_refresh?
+      flush_document!
+    end
+  end
 
+  def flush_document!
     self.class.flush_document document_path
   end
 
