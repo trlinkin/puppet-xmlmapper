@@ -85,7 +85,6 @@ module PuppetX::Provider::XmlMapper
   #
   def exists?
     raise Puppet::Error, self.class.failed_message(document_path) if self.class.failed? document_path
-    self.class.unref! document_path
     @property_hash[:ensure] and @property_hash[:ensure] == :present
   end
 
@@ -105,13 +104,6 @@ module PuppetX::Provider::XmlMapper
       resequence_element
     end
 
-    # Due to temporal coupling issues, we may need to self_refresh at times
-    unless resource.self_refresh?
-      flush_document!
-    end
-  end
-
-  def flush_document!
     self.class.flush_document document_path
   end
 
@@ -330,7 +322,6 @@ module PuppetX::Provider::XmlMapper
 
     def match_resource_with_provider(resource, document)
       unless failed? document
-        ref! document
         matches = instances[document]
         keys    = resource.class.key_attribute_parameters
 
@@ -434,7 +425,7 @@ module PuppetX::Provider::XmlMapper
     end
 
     def flush_document(document)
-      unless ref?(document)
+      if dirty?(document)
         contents = String.new
         file = mapped_file(document)
         xml_doc = xml_document(document)
@@ -467,7 +458,6 @@ module PuppetX::Provider::XmlMapper
       return documents[document][:filetype] unless file and not failed? document
       documents[document][:filetype] = file
       documents[document][:dirty] = false
-      documents[document][:ref]   = 0
     end
 
     def xml_document(document, xml = nil)
@@ -481,18 +471,6 @@ module PuppetX::Provider::XmlMapper
 
     def dirty?(document)
       documents[document][:dirty]
-    end
-
-    def ref!(document)
-      documents[document][:ref] += 1
-    end
-
-    def unref!(document)
-      documents[document][:ref] -= 1
-    end
-
-    def ref?(document)
-      documents[document][:ref] > 0
     end
 
     # Root elements are globally unique and have access to the xmldecl and doctype
