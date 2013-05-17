@@ -3,6 +3,8 @@ module PuppetX::Provider; end
 
 class PuppetX::Provider::XmlComponent
 
+  attr_reader :name
+
   def initialize(name, &block)
     @name = name.intern
     instance_eval &block if block_given?
@@ -25,6 +27,23 @@ class PuppetX::Provider::XmlComponent
 
   def xml_name
     (@name_in_config || @name).to_s
+  end
+
+  def has_parent?
+    !!@parent
+  end
+
+  def parent_name
+    @parent
+  end
+
+  def is
+    @type || :element
+  end
+
+  def is_type?(type)
+    type = type.intern if type.respond_to? :intern and not type.is_a? Symbol
+    type == is
   end
 
   def attr(name)

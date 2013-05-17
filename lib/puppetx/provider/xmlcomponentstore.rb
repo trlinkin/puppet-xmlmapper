@@ -23,25 +23,25 @@ class PuppetX::Provider::XmlComponentStore
   end
 
   def xpath(component)
-    name = component.attr(:name_in_config) ? component.attr(:name_in_config) : component.attr(:name)
-
+    name = component.name
+    xml_name = component.xml_name
     # If we have it cached, return it.
     cached = xpath_cache[name]
     return cached unless cached.nil?
 
     parent_path = "."
-    if parent = component.attr(:parent)
+    if parent = component.parent_name
       begin
-        parent_path = self.xpath(self[parent.intern])
+        parent_path = self.xpath(self[parent])
       rescue Puppet::Error => e
-        raise Puppet::Error, "Component \"#{component.attr(:name)}\" cannot find its parent \"#{component.attr(:parent)}\""
+        raise Puppet::Error, "Component \"#{name}\" cannot find its parent \"#{parent}\""
       end
     end
 
-    if component.attr(:type) == :attribute
-      name = "@#{name}"
+    if component.is_type? :attribute
+      xml_name = "@#{xml_name}"
     end
-    path = "#{parent_path}/#{name}"
+    path = "#{parent_path}/#{xml_name}"
     xpath_cache[name] = path
     return path
   end
