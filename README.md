@@ -1,5 +1,6 @@
 puppet-xmlmapper
 ----------------
+[![Code Climate](https://codeclimate.com/github/trlinkin/puppet-xmlmapper.png)](https://codeclimate.com/github/trlinkin/puppet-xmlmapper)
 
 XmlMapper makes creating providers to control XML configuration a breeze!
 
