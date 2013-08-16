@@ -107,6 +107,22 @@ module PuppetX::Provider::XmlMapper
     self.class.flush_document document_path
   end
 
+  def get_component_state(name)
+    component = self.class.component_store[name]
+    path = self.class.component_store.xpath(component)
+    property = REXML::XPath.first(@element, path)
+
+    return :present if property and resource.should(name) == :present
+
+    if property.is_a? REXML::Element and property.has_text?
+      return property.text
+    elsif property.is_a? REXML::Attribute
+      return property.value
+    end
+
+    return :absent
+  end
+
   # Update a component in the entity.
   def apply_component(component)
     unless component.is_a? PuppetX::Provider::XmlComponent
@@ -242,19 +258,7 @@ module PuppetX::Provider::XmlMapper
         next if :ensure == attr
 
         define_method(attr) do
-          component = self.class.component_store[attr]
-          path = self.class.component_store.xpath(component)
-          property = REXML::XPath.first(@element, path)
-
-          return :present if property and resource.should(attr) == :present
-
-          if property.is_a? REXML::Element and property.has_text?
-            return property.text
-          elsif property.is_a? REXML::Attribute
-            return property.value
-          end
-
-          return :absent
+          get_component_state(attr)
         end
 
         define_method("#{attr}=") do |val|
