@@ -20,8 +20,10 @@ class PuppetX::Provider::XmlComponent
   end
 
   def type(choice)
-    check_input :type, choice
-    raise Puppet::Error, "Component #{@name}: 'type' must be either :attribute or :element." unless [:attribute, :element].include? choice.intern
+    check_input(:type, choice)
+    unless [:attribute, :element].include? choice.intern
+      raise Puppet::Error, "Component #{@name}: 'type' must be either :attribute or :element."
+    end
     @type = choice.intern
   end
 
