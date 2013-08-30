@@ -123,6 +123,11 @@ module PuppetX::Provider::XmlMapper
     return :absent
   end
 
+  def set_new_component_state(name, value)
+    @property_hash[attr] = value
+    self.dirty!
+  end
+
   # Update a component in the entity.
   def apply_component(component)
     unless component.is_a? PuppetX::Provider::XmlComponent
@@ -262,8 +267,7 @@ module PuppetX::Provider::XmlMapper
         end
 
         define_method("#{attr}=") do |val|
-          @property_hash[attr] = val
-          self.dirty!
+          set_new_component_state(attr,val)
         end
       end
     end
