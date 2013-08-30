@@ -18,7 +18,10 @@ class PuppetX::Provider::XmlComponentStore
 
   def [](name)
     name = name.intern
-    raise Puppet::Error, "No component \"#{name}\" available" unless components.include? name
+    unless components.include? name
+      raise Puppet::Error, "No component \"#{name}\" available"
+    end
+
     components[name]
   end
 
