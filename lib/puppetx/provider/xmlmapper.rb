@@ -22,7 +22,7 @@ module PuppetX::Provider::XmlMapper
   end
 
   def document_path
-    @resource[self.class.document_path]
+    resource.document_path
   end
 
   def create
