@@ -43,12 +43,12 @@ module PuppetX::Provider::XmlMapper
       # in order to be created.
       resource.class.key_attribute_parameters.each do |key|
         namevar = key.name
-        @property_hash[namevar] = @resource[namevar]
+        @property_hash[namevar] = resource[namevar]
       end
     end
 
-    @resource.class.validproperties.each do |property|
-      if value = @resource.should(property)
+    resource.class.validproperties.each do |property|
+      if value = resource.should(property)
         @property_hash[property] = value unless value == :absent
       end
     end
