@@ -21,12 +21,16 @@ module PuppetX::Provider::XmlMapper
     end
   end
 
+  def xpath
+    self.class.xpath
+  end
+
   def document_path
     resource.document_path
   end
 
   def create
-    root_name = self.class.xpath.split("/").last
+    root_name = xpath.split("/").last
     @element = REXML::Element.new root_name
 
     # Singleton elements (such as root elements) have no sub-elements that establish

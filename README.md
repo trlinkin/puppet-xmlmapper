@@ -20,7 +20,53 @@ That being the case, managing XML in Puppet can be tricky, and not as declarativ
 approaches using fragments and concatenation, and while good for most other types of configuration (easily applicable to ini
 style files), limits and irritation are quickly faced when tying to apply such ideas to XML.
 
+Usage
+-----
 
+## Basic API
+
+### `Puppet::Type`
+
+#### `document_path`
+
+Any type using XmlMapper in the provider needs to impliment a `document_path` instance method. This is
+used by the provider to load and parse the file being manipulated. This method must return a fully
+qualified file path.
+
+### `Puppet::Provider`
+
+#### `self.xpath=(xpath)`
+
+This method is used to set a static Xpath that the provider should use to find instances. This method sets the
+class instance variable `@xpath`.
+
+#### `self.xpath`
+
+This method should return an Xpath as a string. This method is used internally by the XmlMapper. By default it
+returns the value of the `@xpath` class instance variable. It may be reimplimented to provide an Xpath from a
+more advanced source. Examples are Xpaths that are relative to a parameter. TODO: Provide example.
+
+#### `self.root_element`
+
+This method can be called to indicate that XML Element we're mapping is an XML root element. XML root elements have
+access to the `xmldecl` and `doctype` methods. An XML root element is essentially a singleton element, as in there
+can only be one per XML file. As such, the type needs to have a `namevar` that is not tied to an XmlMapper "componenet".
+
+#### `self.singleton_element`
+
+#### `self.xmldecl (type_property_mapping)`
+
+#### `self.doctype(type_property_mapping)`
+
+#### `self.new_component(type_property_mapping, block)`
+
+### `self.new_component` context
+
+#### `type`
+
+#### `parent`
+
+#### `name_in_config`
 Author
 ------
 
