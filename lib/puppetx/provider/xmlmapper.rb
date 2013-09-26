@@ -4,9 +4,9 @@ require 'puppetx/provider/xmlcomponentstore'
 require 'puppetx/provider/xmldeclcomponent'
 
 # Forward Declaration
-module PuppetX; end
-
-module PuppetX::Provider; end
+module PuppetX
+  module PuppetX::Provider;
+end
 
 module PuppetX::Provider::XmlMapper
 
@@ -26,7 +26,7 @@ module PuppetX::Provider::XmlMapper
   end
 
   def document_path
-    resource.document_path
+    self.document_path
   end
 
   def create
@@ -253,7 +253,6 @@ module PuppetX::Provider::XmlMapper
     def initvars
       @instances       = Hash.new {|h,k| h[k] = []}
       @xpath           = String.new
-      @document_path   = 'document_path'
       @component_store = PuppetX::Provider::XmlComponentStore.new
     end
 
@@ -280,7 +279,7 @@ module PuppetX::Provider::XmlMapper
     #
     def prefetch(resources = {})
       resources.each do |name, resource|
-        doc = resource[self.document_path]
+        doc = resource.document_path
         fetch_document( doc )
 
         fetch_instances( doc )
